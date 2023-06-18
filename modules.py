@@ -91,15 +91,15 @@ class Up(nn.Module):
             self.conv = DoubleConv(in_channels, out_channels)
 
     def forward(self, x1, x2):
-        x1 = self.up(x1)
+        x1 = self.up(x1) # given a tensor (N, C, H, W) --> (N, C, H*2, W*2)
         # input is CHW
-        diffY = x2.size()[2] - x1.size()[2]
-        diffX = x2.size()[3] - x1.size()[3]
+        diffY = x2.size()[2] - x1.size()[2] # Calculate the difference in height between the skip connection (x2) and the upsampled tensor (x1)
+        diffX = x2.size()[3] - x1.size()[3] # Calculate the difference in width between the skip connection (x2) and the upsampled tensor (x1)
 
-        x1 = F.pad(x1, [diffX // 2, diffX - diffX // 2, diffY // 2, diffY - diffY // 2])
-        x = torch.cat([x2, x1], dim=1)
-        x = self.conv(x)
-        x = self.conv2(x)
+        x1 = F.pad(x1, [diffX // 2, diffX - diffX // 2, diffY // 2, diffY - diffY // 2]) # Pad x1 to match the size of x2
+        x = torch.cat([x2, x1], dim=1) # Concat the skip connection (x2) and the upsampled tensor (x1). Output shape: (N, C, H, W) + (N, C, H, W) = (N, 2*C, H, W)
+        x = self.conv(x) # (N, 2*C, H, W) --> (N, 2*C, H, W)
+        x = self.conv2(x) # (N, 2*C, H, W) --> (N, C / 2, H, W)
         return x
 
 

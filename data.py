@@ -25,11 +25,11 @@ class DiffSet(Dataset):
             data = pad(train_dataset.data) # Pad to make it 32x32
             # Add a channel dimension, because the original data only has 1 channel
             data = data.unsqueeze(3) # (N, H, W) -> (N, H, W, C)
-            self.channels = 1 # MNIST only has 1 channel (grayscale)
+            self.depth = 1 # MNIST only has 1 channel (grayscale)
             self.size = 32
         elif dataset == "CIFAR":
             data = torch.Tensor(train_dataset.data) # (N, H, W, C)
-            self.channels = 3 # 3 channels (RGB)
+            self.depth = 3 # 3 channels (RGB)
             self.size = 32
         self.input_seq = ((data / 255.0) * 2.0) - 1.0 # normalize to [-1, 1]
         # Move the channel dimension as second dimension

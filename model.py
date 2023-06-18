@@ -8,10 +8,13 @@ from modules import *
 class DiffusionModel(pl.LightningModule):
     def __init__(self, in_size, t_range, img_channels):
         super().__init__()
+        # Create a linear schedule from beta_small to beta_large
         self.beta_small = 1e-4
         self.beta_large = 0.02
+
+        # The number of time steps in the diffusion process
         self.t_range = t_range
-        self.in_size = in_size
+        self.in_size = in_size # (W * H)
 
         bilinear = True
         self.inc = DoubleConv(img_channels, 64)
@@ -41,17 +44,17 @@ class DiffusionModel(pl.LightningModule):
         """
         Model is U-Net with added positional encodings and self-attention layers.
         """
-        x1 = self.inc(x)
-        x2 = self.down1(x1) + self.pos_encoding(t, 128, 16)
-        x3 = self.down2(x2) + self.pos_encoding(t, 256, 8)
-        x3 = self.sa1(x3)
-        x4 = self.down3(x3) + self.pos_encoding(t, 256, 4)
-        x4 = self.sa2(x4)
-        x = self.up1(x4, x3) + self.pos_encoding(t, 128, 8)
-        x = self.sa3(x)
-        x = self.up2(x, x2) + self.pos_encoding(t, 64, 16)
-        x = self.up3(x, x1) + self.pos_encoding(t, 64, 32)
-        output = self.outc(x)
+        x1 = self.inc(x) # From image chanels to 64 channels. (N, C, H, W) --> (N, 64, H, W)
+        x2 = self.down1(x1) + self.pos_encoding(t, 128, 16) # (N, 64, H, W) --> (N, 128, H/2, W/2) + (N, 128, H/2, W/2) = (N, 128, H/2, W/2)
+        x3 = self.down2(x2) + self.pos_encoding(t, 256, 8) # (N, 128, H/2, W/2) --> (N, 256, H/4, W/4) + (N, 256, H/4, W/4) = (N, 256, H/4, W/4)
+        x3 = self.sa1(x3) # (N, 256, H/4, W/4) --> (N, 256, H/4, W/4)
+        x4 = self.down3(x3) + self.pos_encoding(t, 256, 4) # # (N, 256, N/4, W/4) --> (N, 512, H/8, W/8) + (N, 512, H/8, W/8) = (N, 512, H/8, W/8)
+        x4 = self.sa2(x4) # (N, 256, H/8, W/8) --> (N, 256, H/8, W/8)
+        x = self.up1(x4, x3) + self.pos_encoding(t, 128, 8) # Output shape: (N, 128, H/4, W/4)
+        x = self.sa3(x) # (N, 128, H/4, W/4) --> (N, 128, H/4, W/4)
+        x = self.up2(x, x2) + self.pos_encoding(t, 64, 16) # Output shape: (N, 64, H/2, W/2)
+        x = self.up3(x, x1) + self.pos_encoding(t, 64, 32) # Output shape: (N, 64, H, W)
+        output = self.outc(x) # From 64 channels to image channels. (N, 64, H, W) --> (N, C, H, W)
         return output
 
     def beta(self, t):
@@ -69,16 +72,16 @@ class DiffusionModel(pl.LightningModule):
         """
         Corresponds to Algorithm 1 from (Ho et al., 2020).
         """
-        ts = torch.randint(0, self.t_range, [batch.shape[0]], device=self.device)
+        ts = torch.randint(0, self.t_range, [batch.shape[0]], device=self.device) # Get random time steps, one for each sample in the batch. Shape: (N,)
         noise_imgs = []
-        epsilons = torch.randn(batch.shape, device=self.device)
+        epsilons = torch.randn(batch.shape, device=self.device) # Random noise for each sample in the batch. Shape: (N, C, H, W)
         for i in range(len(ts)):
-            a_hat = self.alpha_bar(ts[i])
+            a_hat = self.alpha_bar(ts[i]) # Get alpha_bar for the time step "t" defined by ts[i]
             noise_imgs.append(
-                (math.sqrt(a_hat) * batch[i]) + (math.sqrt(1 - a_hat) * epsilons[i])
+                (math.sqrt(a_hat) * batch[i]) + (math.sqrt(1 - a_hat) * epsilons[i]) # Generate the noisy image at time step "t" defined by ts[i]
             )
-        noise_imgs = torch.stack(noise_imgs, dim=0)
-        e_hat = self.forward(noise_imgs, ts.unsqueeze(-1).type(torch.float))
+        noise_imgs = torch.stack(noise_imgs, dim=0) # Shape: (N, C, H, W)
+        e_hat = self.forward(noise_imgs, ts.unsqueeze(-1).type(torch.float)) # Output shape: (N, C, H, W)
         loss = nn.functional.mse_loss(
             e_hat.reshape(-1, self.in_size), epsilons.reshape(-1, self.in_size)
         )
@@ -93,7 +96,7 @@ class DiffusionModel(pl.LightningModule):
                 z = torch.randn(x.shape)
             else:
                 z = 0
-            e_hat = self.forward(x, t.view(1, 1).repeat(x.shape[0], 1))
+            e_hat = self.forward(x, t.view(1, 1).repeat(x.shape[0], 1)) # Predict the noise for the current time step. Output shape: (N, C, H, W)
             pre_scale = 1 / math.sqrt(self.alpha(t))
             e_scale = (1 - self.alpha(t)) / math.sqrt(1 - self.alpha_bar(t))
             post_sigma = math.sqrt(self.beta(t)) * z
