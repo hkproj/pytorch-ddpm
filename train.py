@@ -5,13 +5,14 @@ from model import DiffusionModel
 from torch.utils.data import DataLoader
 import imageio
 import glob
+from tqdm import tqdm
 
 if __name__ == '__main__':
     # Training hyperparameters
-    diffusion_time_steps = 1000
-    dataset_choice = "CelebA"
-    max_epoch = 20
-    batch_size = 128
+    diffusion_steps = 1000
+    dataset_choice = "CIFAR"
+    max_epoch = 10
+    batch_size = 32
 
     # Loading parameters
     load_model = False
@@ -36,9 +37,9 @@ if __name__ == '__main__':
 
     # Create model and trainer
     if load_model:
-        model = DiffusionModel.load_from_checkpoint(last_checkpoint, in_size=train_dataset.size*train_dataset.size, t_range=diffusion_time_steps, img_depth=train_dataset.depth)
+        model = DiffusionModel.load_from_checkpoint(last_checkpoint, in_size=train_dataset.size*train_dataset.size, t_range=diffusion_steps, img_depth=train_dataset.depth)
     else:
-        model = DiffusionModel(train_dataset.size*train_dataset.size, diffusion_time_steps, train_dataset.depth)
+        model = DiffusionModel(train_dataset.size*train_dataset.size, diffusion_steps, train_dataset.depth)
 
     # Load Trainer model
     tb_logger = pl.loggers.TensorBoardLogger(
@@ -50,6 +51,9 @@ if __name__ == '__main__':
     trainer = pl.Trainer(
         max_epochs=max_epoch, 
         log_every_n_steps=10, 
+        #gpus=1, 
+        #auto_select_gpus=True,
+        #resume_from_checkpoint=last_checkpoint, 
         logger=tb_logger
     )
 
@@ -62,19 +66,19 @@ if __name__ == '__main__':
 
     # Generate samples from denoising process
     gen_samples = []
-    x = torch.randn((sample_batch_size, train_dataset.depth, train_dataset.size, train_dataset.size)) # Shape: (N, C, H, W)
+    x = torch.randn((sample_batch_size, train_dataset.depth, train_dataset.size, train_dataset.size))
     sample_steps = torch.arange(model.t_range-1, 0, -1)
-    for t in sample_steps: # Reverse diffusion for "sample_steps" iterations (1000)
+    for t in tqdm(sample_steps, desc="Sampling"):
         x = model.denoise_sample(x, t)
         if t % 50 == 0:
             gen_samples.append(x)
     for _ in range(n_hold_final):
         gen_samples.append(x)
-    gen_samples = torch.stack(gen_samples, dim=0).moveaxis(2, 4).squeeze(-1) # Shape: (T, N, C, H, W) --> (T, N, H, W, C) --> (T, N, H, W)
-    gen_samples = (gen_samples.clamp(-1, 1) + 1) / 2 # Clamp to [0, 1] and normalize
+    gen_samples = torch.stack(gen_samples, dim=0).moveaxis(2, 4).squeeze(-1)
+    gen_samples = (gen_samples.clamp(-1, 1) + 1) / 2
 
     # Process samples and save as gif
-    gen_samples = (gen_samples * 255).type(torch.uint8) # Unnormalize and convert to uint8
+    gen_samples = (gen_samples * 255).type(torch.uint8)
     gen_samples = gen_samples.reshape(-1, gif_shape[0], gif_shape[1], train_dataset.size, train_dataset.size, train_dataset.depth)
 
     def stack_samples(gen_samples, stack_dim):
