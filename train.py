@@ -9,9 +9,9 @@ import glob
 if __name__ == '__main__':
     # Training hyperparameters
     diffusion_time_steps = 1000
-    dataset_choice = "CIFAR"
+    dataset_choice = "CelebA"
     max_epoch = 20
-    batch_size = 300
+    batch_size = 128
 
     # Loading parameters
     load_model = False

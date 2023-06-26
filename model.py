@@ -15,8 +15,10 @@ class DiffusionModel(pl.LightningModule):
         # The number of time steps in the diffusion process
         self.t_range = t_range
         self.in_size = in_size # (W * H)
+        self.img_channels = img_channels
 
-        bilinear = True
+
+        bilinear = False
         self.inc = DoubleConv(img_channels, 64)
         self.down1 = Down(64, 128)
         self.down2 = Down(128, 256)
@@ -44,17 +46,54 @@ class DiffusionModel(pl.LightningModule):
         """
         Model is U-Net with added positional encodings and self-attention layers.
         """
-        x1 = self.inc(x) # From image chanels to 64 channels. (N, C, H, W) --> (N, 64, H, W)
-        x2 = self.down1(x1) + self.pos_encoding(t, 128, 16) # (N, 64, H, W) --> (N, 128, H/2, W/2) + (N, 128, H/2, W/2) = (N, 128, H/2, W/2)
-        x3 = self.down2(x2) + self.pos_encoding(t, 256, 8) # (N, 128, H/2, W/2) --> (N, 256, H/4, W/4) + (N, 256, H/4, W/4) = (N, 256, H/4, W/4)
-        x3 = self.sa1(x3) # (N, 256, H/4, W/4) --> (N, 256, H/4, W/4)
-        x4 = self.down3(x3) + self.pos_encoding(t, 256, 4) # # (N, 256, N/4, W/4) --> (N, 512, H/8, W/8) + (N, 512, H/8, W/8) = (N, 512, H/8, W/8)
-        x4 = self.sa2(x4) # (N, 256, H/8, W/8) --> (N, 256, H/8, W/8)
-        x = self.up1(x4, x3) + self.pos_encoding(t, 128, 8) # Output shape: (N, 128, H/4, W/4)
-        x = self.sa3(x) # (N, 128, H/4, W/4) --> (N, 128, H/4, W/4)
-        x = self.up2(x, x2) + self.pos_encoding(t, 64, 16) # Output shape: (N, 64, H/2, W/2)
-        x = self.up3(x, x1) + self.pos_encoding(t, 64, 32) # Output shape: (N, 64, H, W)
-        output = self.outc(x) # From 64 channels to image channels. (N, 64, H, W) --> (N, C, H, W)
+
+        # From image chanels to 64 channels.
+        # (N, C, H, W) --> (N, 64, H, W)
+        x1 = self.inc(x)
+
+        # (N, 64, H, W) --> (N, 128, H/2, W/2)
+        x2_temp = self.down1(x1)
+        # (N, 128, H/2, W/2) + (N, 128, H/2, W/2) = (N, 128, H/2, W/2)
+        x2 = x2_temp + self.pos_encoding(t, x2_temp.shape[1], x2_temp.shape[2])
+        
+        # (N, 128, H/2, W/2) --> (N, 256, H/4, W/4)
+        x3_temp = self.down2(x2)
+        # (N, 256, H/4, W/4) + (N, 256, H/4, W/4) = (N, 256, H/4, W/4)
+        x3 = x3_temp + self.pos_encoding(t, x3_temp.shape[1], x3_temp.shape[2])
+
+        # (N, 256, H/4, W/4) --> (N, 256, H/4, W/4)
+        x3 = self.sa1(x3) 
+
+        # (N, 256, N/4, W/4) --> (N, 256, H/8, W/8)
+        x4_temp = self.down3(x3)
+        # (N, 256, H/8, W/8) + (N, 256, H/8, W/8) = (N, 256, H/8, W/8)
+        x4 = x4_temp + self.pos_encoding(t, x4_temp.shape[1], x4_temp.shape[2])
+
+        # (N, 256, H/8, W/8) --> (N, 256, H/8, W/8)
+        x4 = self.sa2(x4)
+
+        # Output shape: (N, 128, H/4, W/4)
+        x_temp = self.up1(x4, x3)
+        # (N, 128, H/4, W/4) + (N, 128, H/4, W/4) = (N, 128, H/4, W/4)
+        x = x_temp + self.pos_encoding(t, x_temp.shape[1], x_temp.shape[2])
+
+        # (N, 128, H/4, W/4) --> (N, 128, H/4, W/4)
+        x = self.sa3(x)
+
+        # Output shape: (N, 64, H/2, W/2)
+        x_temp = self.up2(x, x2)
+        # (N, 64, H/2, W/2) + (N, 64, H/2, W/2) = (N, 64, H/2, W/2)
+        x = x_temp + self.pos_encoding(t, x_temp.shape[1], x_temp.shape[2])
+
+        # Output shape: (N, 64, H, W)
+        x_temp = self.up3(x, x1)
+        # (N, 64, H, W) + (N, 64, H, W) = (N, 64, H, W)
+        x = x_temp + self.pos_encoding(t, x_temp.shape[1], x_temp.shape[2])
+        
+        # From 64 channels to image channels. 
+        # (N, 64, H, W) --> (N, C, H, W)
+        output = self.outc(x)
+
         return output
 
     def beta(self, t):
@@ -83,7 +122,7 @@ class DiffusionModel(pl.LightningModule):
         noise_imgs = torch.stack(noise_imgs, dim=0) # Shape: (N, C, H, W)
         e_hat = self.forward(noise_imgs, ts.unsqueeze(-1).type(torch.float)) # Output shape: (N, C, H, W)
         loss = nn.functional.mse_loss(
-            e_hat.reshape(-1, self.in_size), epsilons.reshape(-1, self.in_size)
+            e_hat.reshape(-1, self.in_size * self.img_channels), epsilons.reshape(-1, self.in_size * self.img_channels)
         )
         return loss
 
