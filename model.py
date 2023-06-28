@@ -32,6 +32,9 @@ class DiffusionModel(pl.LightningModule):
         return self.unet(x, t)
 
     def beta(self, t):
+        """
+        Implements a linear schedule for beta.
+        """
         return self.beta_small + (t / self.t_range) * (
             self.beta_large - self.beta_small
         )
