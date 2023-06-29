@@ -7,34 +7,29 @@ from torchvision import transforms
 class DiffSet(Dataset):
     def __init__(self, train, dataset_name="MNIST"):
 
-        ds_maping = {
-            "MNIST": MNIST,
-            "FashionMNIST": FashionMNIST,
-            "CIFAR10": CIFAR10,
-            "CelebA": CelebA,
+        ds_mapping = {
+            "MNIST": (MNIST, 32),
+            "FashionMNIST": (FashionMNIST, 32),
+            "CIFAR10": (CIFAR10, 32),
+            "CelebA": (CelebA, 128),
         }
 
-        img_sizes = {
-            "MNIST": 32,
-            "FashionMNIST": 32,
-            "CIFAR10": 32,
-            "CelebA": 128
-        }
+        ds, img_size = ds_mapping[dataset_name]
 
         if dataset_name != "CelebA":
             t = transforms.Compose([transforms.ToTensor()])
-            ds = ds_maping[dataset_name](
+            ds = ds(
                 "./data", download=True, train=train, transform=t
             )
         else:
-            t = transforms.Compose([transforms.ToTensor(), transforms.Resize((img_sizes[dataset_name], img_sizes[dataset_name]), antialias=True)])
-            ds = ds_maping[dataset_name](
+            t = transforms.Compose([transforms.ToTensor(), transforms.Resize((img_size, img_size), antialias=True)])
+            ds = ds(
                 "./data", download=True, transform=t, split=("train" if train else "test")
             )
 
         self.ds = ds
         self.dataset_name = dataset_name
-        self.size = img_sizes[dataset_name]
+        self.size = img_size
  
         # Set channel and image size
         if self.dataset_name == "MNIST" or self.dataset_name == "FashionMNIST":
@@ -53,14 +48,9 @@ class DiffSet(Dataset):
         if self.dataset_name == "MNIST" or self.dataset_name == "FashionMNIST":
             pad = transforms.Pad(2)
             data = pad(ds_item) # Pad to make it 32x32
-            # Add a channel dimension, because the original data only has 1 channel
-        elif self.dataset_name == "CIFAR10":
-            data = torch.Tensor(ds_item)
-        elif self.dataset_name == "CelebA":
-            data = torch.Tensor(ds_item)
+        else:
+            data = ds_item
         
-        data = ((data / 255.0) * 2.0) - 1.0 # normalize to [-1, 1]
-        # Move the channel dimension as second dimension
-        # data = data.moveaxis(3, 1)  # (N, H, W, C) -> (N, C, H, W)
-
+        # No need to scale by 255 because it is already in [0, 1] range thanks to the ToTensor transform
+        data = (data * 2.0) - 1.0 # normalize to [-1, 1].
         return data
