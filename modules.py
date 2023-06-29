@@ -51,7 +51,6 @@ class RMSNorm(nn.Module):
         return F.normalize(x, dim = 1) * self.g * (x.shape[1] ** 0.5)
 
 # sinusoidal positional embeds
-
 class SinusoidalPosEmb(nn.Module):
     def __init__(self, dim):
         super().__init__()
@@ -65,23 +64,6 @@ class SinusoidalPosEmb(nn.Module):
         emb = x[:, None] * emb[None, :]
         emb = torch.cat((emb.sin(), emb.cos()), dim=-1)
         return emb
-    
-class RandomOrLearnedSinusoidalPosEmb(nn.Module):
-    """ following @crowsonkb 's lead with random (learned optional) sinusoidal pos emb """
-    """ https://github.com/crowsonkb/v-diffusion-jax/blob/master/diffusion/models/danbooru_128.py#L8 """
-
-    def __init__(self, dim, is_random = False):
-        super().__init__()
-        assert (dim % 2) == 0
-        half_dim = dim // 2
-        self.weights = nn.Parameter(torch.randn(half_dim), requires_grad = not is_random)
-
-    def forward(self, x):
-        x = rearrange(x, 'b -> b 1')
-        freqs = x * rearrange(self.weights, 'd -> 1 d') * 2 * math.pi
-        fouriered = torch.cat((freqs.sin(), freqs.cos()), dim = -1)
-        fouriered = torch.cat((x, fouriered), dim = -1)
-        return fouriered
 
 # building block modules
 # Represents a convolution block with a group normalization layer and an activation function
@@ -167,22 +149,13 @@ class Unet(nn.Module):
         out_dim = None,
         dim_mults = (1, 2, 4, 8),
         channels = 3,
-        self_condition = False,
-        resnet_block_groups = 8,
-        learned_variance = False,
-        learned_sinusoidal_cond = False,
-        random_fourier_features = False,
-        learned_sinusoidal_dim = 16,
-        full_attn = (True, True, True, True)
+        resnet_block_groups = 8
     ):
         super().__init__()
 
         # determine dimensions
-
         self.channels = channels # Image channels
-        # Self Conditioning (https://arxiv.org/abs/2208.04202)
-        self.self_condition = self_condition
-        input_channels = channels * (2 if self_condition else 1)
+        input_channels = channels
 
         init_dim = default(init_dim, dim) # Initial dimension of the feature map extracted from the input image
         self.init_conv = nn.Conv2d(input_channels, init_dim, 7, padding = 3) # Convert the input image into a feature map
@@ -196,14 +169,8 @@ class Unet(nn.Module):
 
         time_dim = dim * 4 # The size of the time embedding
 
-        self.random_or_learned_sinusoidal_cond = learned_sinusoidal_cond or random_fourier_features
-
-        if self.random_or_learned_sinusoidal_cond:
-            sinu_pos_emb = RandomOrLearnedSinusoidalPosEmb(learned_sinusoidal_dim, random_fourier_features)
-            fourier_dim = learned_sinusoidal_dim + 1
-        else:
-            sinu_pos_emb = SinusoidalPosEmb(dim) # Positional Encodings just like in normal transformer
-            fourier_dim = dim
+        sinu_pos_emb = SinusoidalPosEmb(dim) # Positional Encodings just like in normal transformer
+        fourier_dim = dim
 
         self.time_mlp = nn.Sequential(
             sinu_pos_emb,
@@ -212,65 +179,46 @@ class Unet(nn.Module):
             nn.Linear(time_dim, time_dim)
         )
 
-        # attention
-
-        full_attn = cast_tuple(full_attn, length = len(dim_mults)) # Indicates at which later the full attention is applied, otherwise linear attention is used
-        assert len(full_attn) == len(dim_mults)
-
-        FullAttention = partial(Attention)
-
         # layers
 
         self.downs = nn.ModuleList([])
         self.ups = nn.ModuleList([])
         num_resolutions = len(in_out) # Number of layers (up and downs) in the UNet
 
-        for ind, ((dim_in, dim_out), layer_full_attn) in enumerate(zip(in_out, full_attn)):
+        for ind, ((dim_in, dim_out)) in enumerate(in_out):
             is_last = ind >= (num_resolutions - 1)
-
-            attn_klass = FullAttention
 
             self.downs.append(nn.ModuleList([
                 block_klass(dim_in, dim_in, time_emb_dim = time_dim),
                 block_klass(dim_in, dim_in, time_emb_dim = time_dim),
-                attn_klass(dim_in),
+                Attention(dim_in),
                 Downsample(dim_in, dim_out) if not is_last else nn.Conv2d(dim_in, dim_out, 3, padding = 1)
             ]))
 
         mid_dim = dims[-1] # The dimension of the middle layer of the UNet = 512
         self.mid_block1 = block_klass(mid_dim, mid_dim, time_emb_dim = time_dim)
-        self.mid_attn = FullAttention(mid_dim)
+        self.mid_attn = Attention(mid_dim)
         self.mid_block2 = block_klass(mid_dim, mid_dim, time_emb_dim = time_dim)
 
-        for ind, ((dim_in, dim_out), layer_full_attn) in enumerate(zip(reversed(in_out), reversed(full_attn))):
+        for ind, ((dim_in, dim_out)) in enumerate(reversed(in_out)):
             is_last = ind == (len(in_out) - 1)
-
-            attn_klass = FullAttention
 
             self.ups.append(nn.ModuleList([
                 block_klass(dim_out + dim_in, dim_out, time_emb_dim = time_dim),
                 block_klass(dim_out + dim_in, dim_out, time_emb_dim = time_dim),
-                attn_klass(dim_out),
+                Attention(dim_out),
                 Upsample(dim_out, dim_in) if not is_last else  nn.Conv2d(dim_out, dim_in, 3, padding = 1)
             ]))
 
-        default_out_dim = channels * (1 if not learned_variance else 2)
+        default_out_dim = channels
         self.out_dim = default(out_dim, default_out_dim) # Channels of the output image
 
         self.final_res_block = block_klass(dim * 2, dim, time_emb_dim = time_dim)
         self.final_conv = nn.Conv2d(dim, self.out_dim, 1)
 
-    def forward(self, x, time, x_self_cond = None):
-
+    def forward(self, x, time):
         # x: [batch_size, channels, height, width]
         # time: [batch_size]
-
-        # Self Conditioning: https://arxiv.org/abs/2208.04202
-        # Improves sample quality by conditioning each time step on the previously generated samples
-        # This is done by concatenating the previous samples to the input of the network
-        if self.self_condition:
-            x_self_cond = default(x_self_cond, lambda: torch.zeros_like(x))
-            x = torch.cat((x_self_cond, x), dim = 1)
 
         x = self.init_conv(x)
         r = x.clone()
