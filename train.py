@@ -13,7 +13,7 @@ import os
 if __name__ == "__main__":
     # Training hyperparameters
     diffusion_steps = 1000
-    dataset_choice = "CIFAR"
+    dataset_choice = "CIFAR10"
     max_epoch = 10
     batch_size = 32
 
