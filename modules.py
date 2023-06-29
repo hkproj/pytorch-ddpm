@@ -171,15 +171,14 @@ class Attention(nn.Module):
         self,
         dim,
         heads = 4,
-        dim_head = 32,
-        flash = False
+        dim_head = 32
     ):
         super().__init__()
         self.heads = heads
         hidden_dim = dim_head * heads
 
         self.norm = RMSNorm(dim)
-        self.attend = Attend(flash = flash)
+        self.attend = Attend()
 
         self.to_qkv = nn.Conv2d(dim, hidden_dim * 3, 1, bias = False)
         self.to_out = nn.Conv2d(hidden_dim, dim, 1)
@@ -211,8 +210,7 @@ class Unet(nn.Module):
         learned_sinusoidal_cond = False,
         random_fourier_features = False,
         learned_sinusoidal_dim = 16,
-        full_attn = (True, True, True, True),
-        flash_attn = False
+        full_attn = (True, True, True, True)
     ):
         super().__init__()
 
@@ -256,7 +254,7 @@ class Unet(nn.Module):
         full_attn = cast_tuple(full_attn, length = len(dim_mults)) # Indicates at which later the full attention is applied, otherwise linear attention is used
         assert len(full_attn) == len(dim_mults)
 
-        FullAttention = partial(Attention, flash = flash_attn)
+        FullAttention = partial(Attention)
 
         # layers
 
