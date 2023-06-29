@@ -84,6 +84,7 @@ class Block(nn.Module):
 
         x = self.act(x)
         return x
+    
 # Each ResnetBlock is composed of two blocks and a residual connection
 class ResnetBlock(nn.Module):
     def __init__(self, dim, dim_out, *, time_emb_dim = None, groups = 8):
@@ -166,21 +167,16 @@ class Unet(nn.Module):
         block_klass = partial(ResnetBlock, groups = resnet_block_groups) # Initializes the number of groups for Group Normalization
 
         # time embeddings
-
         time_dim = dim * 4 # The size of the time embedding
-
         sinu_pos_emb = SinusoidalPosEmb(dim) # Positional Encodings just like in normal transformer
-        fourier_dim = dim
-
         self.time_mlp = nn.Sequential(
             sinu_pos_emb,
-            nn.Linear(fourier_dim, time_dim), # Linear layer to project the positional encodings (of size "dim") to the time embedding size
+            nn.Linear(dim, time_dim), # Linear layer to project the positional encodings (of size "dim") to the time embedding size
             nn.GELU(),
             nn.Linear(time_dim, time_dim)
         )
 
         # layers
-
         self.downs = nn.ModuleList([])
         self.ups = nn.ModuleList([])
         num_resolutions = len(in_out) # Number of layers (up and downs) in the UNet
