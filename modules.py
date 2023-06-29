@@ -1,20 +1,12 @@
 import math
-from pathlib import Path
-from random import random
 from functools import partial
-from collections import namedtuple
-from multiprocessing import cpu_count
 
 import torch
-from torch import nn, einsum
-from torch.cuda.amp import autocast
+from torch import nn
 import torch.nn.functional as F
-
-from torch.optim import Adam
 
 from einops import rearrange
 from einops.layers.torch import Rearrange
-
 
 from attend import Attend
 
@@ -35,35 +27,6 @@ def cast_tuple(t, length = 1):
 
 def identity(t, *args, **kwargs):
     return t
-
-def cycle(dl):
-    while True:
-        for data in dl:
-            yield data
-
-def has_int_squareroot(num):
-    return (math.sqrt(num) ** 2) == num
-
-def num_to_groups(num, divisor):
-    groups = num // divisor
-    remainder = num % divisor
-    arr = [divisor] * groups
-    if remainder > 0:
-        arr.append(remainder)
-    return arr
-
-def convert_image_to_fn(img_type, image):
-    if image.mode != img_type:
-        return image.convert(img_type)
-    return image
-
-# normalization functions
-
-def normalize_to_neg_one_to_one(img):
-    return img * 2 - 1
-
-def unnormalize_to_zero_to_one(t):
-    return (t + 1) * 0.5
 
 # small helper modules
 
