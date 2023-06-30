@@ -15,16 +15,6 @@ class DiffusionModel(pl.LightningModule):
 
         self.unet = Unet(dim = 64, dim_mults = (1, 2, 4, 8), channels=img_depth)
 
-    def pos_encoding(self, t, channels, embed_size):
-        inv_freq = 1.0 / (
-            10000
-            ** (torch.arange(0, channels, 2, device=self.device).float() / channels)
-        )
-        pos_enc_a = torch.sin(t.repeat(1, channels // 2) * inv_freq)
-        pos_enc_b = torch.cos(t.repeat(1, channels // 2) * inv_freq)
-        pos_enc = torch.cat([pos_enc_a, pos_enc_b], dim=-1)
-        return pos_enc.view(-1, channels, 1, 1).repeat(1, 1, embed_size, embed_size)
-
     def forward(self, x, t):
         """
         Model is U-Net with added positional encodings and self-attention layers.
