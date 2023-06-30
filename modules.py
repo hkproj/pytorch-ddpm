@@ -2,13 +2,11 @@ import math
 from functools import partial
 
 import torch
-from torch import nn
+from torch import nn,einsum
 import torch.nn.functional as F
 
 from einops import rearrange
 from einops.layers.torch import Rearrange
-
-from attend import Attend
 
 # helpers functions
 
@@ -57,6 +55,9 @@ class SinusoidalPosEmb(nn.Module):
         self.dim = dim
 
     def forward(self, x):
+        # Original formula from "Attention is all you need": PE(pos, i) = func(pos / 10000^(i/dim))
+        # The following positional encodings are evaluated in log space.
+        # Input: (B). Output: (B, dim)
         device = x.device
         half_dim = self.dim // 2
         emb = math.log(10000) / (half_dim - 1)
@@ -99,18 +100,47 @@ class ResnetBlock(nn.Module):
         self.res_conv = nn.Conv2d(dim, dim_out, 1) if dim != dim_out else nn.Identity()
 
     def forward(self, x, time_emb = None):
-
         scale_shift = None
         if exists(self.mlp) and exists(time_emb):
             time_emb = self.mlp(time_emb)
+            # Add two dimensions to time_emb
             time_emb = rearrange(time_emb, 'b c -> b c 1 1')
+            # Divide the time embedding into two parts along the channel dimension
             scale_shift = time_emb.chunk(2, dim = 1)
 
         h = self.block1(x, scale_shift = scale_shift)
-
         h = self.block2(h)
 
         return h + self.res_conv(x)
+
+class Attend(nn.Module):
+    def __init__(
+        self,
+        dropout = 0.,
+    ):
+        super().__init__()
+        self.dropout = dropout
+        self.attn_dropout = nn.Dropout(dropout)
+
+
+    def forward(self, q, k, v):
+        """
+        einstein notation
+        b - batch
+        h - heads
+        n, i, j - sequence length (base sequence length, source, target)
+        d - feature dimension
+        """
+        q_len, k_len, device = q.shape[-2], k.shape[-2], q.device
+        scale = q.shape[-1] ** -0.5
+        # similarity
+        sim = einsum(f"b h i d, b h j d -> b h i j", q, k) * scale
+        # attention
+        attn = sim.softmax(dim = -1)
+        attn = self.attn_dropout(attn)
+        # aggregate values
+        out = einsum(f"b h i j, b h j d -> b h i d", attn, v)
+        return out
 
 class Attention(nn.Module):
     def __init__(
@@ -131,14 +161,10 @@ class Attention(nn.Module):
 
     def forward(self, x):
         b, c, h, w = x.shape
-
         x = self.norm(x)
-
         qkv = self.to_qkv(x).chunk(3, dim = 1)
         q, k, v = map(lambda t: rearrange(t, 'b (h c) x y -> b h (x y) c', h = self.heads), qkv)
-
         out = self.attend(q, k, v)
-
         out = rearrange(out, 'b h (x y) d -> b (h d) x y', x = h, y = w)
         return self.to_out(out)
 
@@ -171,7 +197,7 @@ class Unet(nn.Module):
         sinu_pos_emb = SinusoidalPosEmb(dim) # Positional Encodings just like in normal transformer
         self.time_mlp = nn.Sequential(
             sinu_pos_emb,
-            nn.Linear(dim, time_dim), # Linear layer to project the positional encodings (of size "dim") to the time embedding size
+            nn.Linear(dim, time_dim),
             nn.GELU(),
             nn.Linear(time_dim, time_dim)
         )
@@ -213,24 +239,21 @@ class Unet(nn.Module):
         self.final_conv = nn.Conv2d(dim, self.out_dim, 1)
 
     def forward(self, x, time):
-        # x: [batch_size, channels, height, width]
-        # time: [batch_size]
-
+        # x: [BATCH, CHANNELS, HEIGHT, WIDTH]
+        # time: [B]
         x = self.init_conv(x)
         r = x.clone()
-
         t = self.time_mlp(time)
 
         h = []
 
         for block1, block2, attn, downsample in self.downs:
+
             x = block1(x, t)
             h.append(x)
-
             x = block2(x, t)
             x = attn(x) + x
             h.append(x)
-
             x = downsample(x)
 
         x = self.mid_block1(x, t)
@@ -238,16 +261,14 @@ class Unet(nn.Module):
         x = self.mid_block2(x, t)
 
         for block1, block2, attn, upsample in self.ups:
+
             x = torch.cat((x, h.pop()), dim = 1)
             x = block1(x, t)
-
             x = torch.cat((x, h.pop()), dim = 1)
             x = block2(x, t)
             x = attn(x) + x
-
             x = upsample(x)
 
         x = torch.cat((x, r), dim = 1)
-
         x = self.final_res_block(x, t)
         return self.final_conv(x)
