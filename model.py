@@ -16,15 +16,9 @@ class DiffusionModel(pl.LightningModule):
         self.unet = Unet(dim = 64, dim_mults = (1, 2, 4, 8), channels=img_depth)
 
     def forward(self, x, t):
-        """
-        Model is U-Net with added positional encodings and self-attention layers.
-        """
         return self.unet(x, t)
 
     def beta(self, t):
-        """
-        Implements a linear schedule for beta.
-        """
         return self.beta_small + (t / self.t_range) * (
             self.beta_large - self.beta_small
         )
