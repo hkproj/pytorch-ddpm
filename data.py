@@ -5,39 +5,22 @@ from torchvision import transforms
 
 
 class DiffSet(Dataset):
-    def __init__(self, train, dataset_name="MNIST"):
+    def __init__(self, train, dataset_name):
 
         ds_mapping = {
-            "MNIST": (MNIST, 32),
-            "FashionMNIST": (FashionMNIST, 32),
-            "CIFAR10": (CIFAR10, 32),
-            "CelebA": (CelebA, 128),
+            "MNIST": (MNIST, 32, 1),
+            "FashionMNIST": (FashionMNIST, 32, 1),
+            "CIFAR10": (CIFAR10, 32, 3),
         }
 
-        ds, img_size = ds_mapping[dataset_name]
-
-        if dataset_name != "CelebA":
-            t = transforms.Compose([transforms.ToTensor()])
-            ds = ds(
-                "./data", download=True, train=train, transform=t
-            )
-        else:
-            t = transforms.Compose([transforms.ToTensor(), transforms.Resize((img_size, img_size), antialias=True)])
-            ds = ds(
-                "./data", download=True, transform=t, split=("train" if train else "test")
-            )
+        t = transforms.Compose([transforms.ToTensor()])
+        ds, img_size, channels = ds_mapping[dataset_name]
+        ds = ds("./data", download=True, train=train, transform=t)
 
         self.ds = ds
         self.dataset_name = dataset_name
         self.size = img_size
- 
-        # Set channel and image size
-        if self.dataset_name == "MNIST" or self.dataset_name == "FashionMNIST":
-            self.depth = 1 # MNIST only has 1 channel (grayscale)
-        elif self.dataset_name == "CIFAR10":
-            self.depth = 3 # 3 channels (RGB)
-        elif self.dataset_name == "CelebA":
-            self.depth = 3 # 3 channels (RGB)
+        self.depth = channels
 
     def __len__(self):
         return len(self.ds)
@@ -51,6 +34,5 @@ class DiffSet(Dataset):
         else:
             data = ds_item
         
-        # No need to scale by 255 because it is already in [0, 1] range thanks to the ToTensor transform
         data = (data * 2.0) - 1.0 # normalize to [-1, 1].
         return data
