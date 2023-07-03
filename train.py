@@ -18,19 +18,23 @@ def sample_gif(model, train_dataset, output_dir) -> None:
     # Generate samples from denoising process
     gen_samples = []
     sampled_steps = []
+    # Generate random noise
     x = torch.randn(
         (sample_batch_size, train_dataset.depth, train_dataset.size, train_dataset.size)
     )
     sample_steps = torch.arange(model.t_range - 1, 0, -1)
     sampled_t = 0
+    # Denoise the initial noise for T steps
     for t in tqdm(sample_steps, desc="Sampling"):
         x = model.denoise_sample(x, t)
         sampled_t = t
         gen_samples.append(x)
         sampled_steps.append(sampled_t)
+    # Add the final image to the end of the GIF many times to hold it fixed
     for _ in range(n_hold_final):
         gen_samples.append(x)
         sampled_steps.append(sampled_t)
+
     gen_samples = torch.stack(gen_samples, dim=0).moveaxis(2, 4).squeeze(-1)
     gen_samples = (gen_samples.clamp(-1, 1) + 1) / 2
 
@@ -47,7 +51,6 @@ def sample_gif(model, train_dataset, output_dir) -> None:
     )
 
     # Add a text to the first image in each grid to indicate the step shown
-
     def add_text_to_image(image, text):
         black_image = np.zeros_like(image.numpy())
         black_image = Image.fromarray(black_image, "RGB")
